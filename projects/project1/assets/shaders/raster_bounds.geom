@@ -1,7 +1,5 @@
 #version 410 core
 
-// Clip each source triangle like buildScreenTriangles() on the CPU, then emit
-// candidate fragments for every triangle in the clipped polygon's fan.
 layout(triangles) in;
 layout(triangle_strip, max_vertices = 21) out;
 
@@ -12,8 +10,6 @@ in VertexData {
     vec2 uv;
 } vertexData[];
 
-// The fragment shader evaluates the screen-space edges itself. These values
-// must stay constant across each generated candidate triangle.
 flat out vec4 gScreenAndInvW[3];
 flat out vec3 gWorld[3];
 flat out vec3 gNormal[3];
@@ -29,21 +25,35 @@ struct ClipVertex {
 };
 
 struct ScreenVertex {
-    // xy is pixel position, z is depth, and w is 1 / clip-space w.
     vec4 screenAndInvW;
     vec3 worldPosition;
     vec3 normal;
     vec2 uv;
 };
 
-// A triangle clipped by six planes has at most nine vertices. Keep the side
-// where dot(plane, vertex.clip) >= 0, just as the CPU clipAgainst() does.
 int clipAgainst(inout ClipVertex polygon[9], int count, vec4 plane) {
-    // TODO: Clip the polygon against this plane with Sutherland-Hodgman.
-    // Hint: visit every edge, including the edge from the last vertex to the first;
-    // emit a crossing vertex when the endpoints are on opposite sides.
-    /*************************************** TODO BEGIN ******************************************/
-    /**************************************** TODO END *******************************************/
+    ClipVertex result[9];
+    int outCount = 0;
+    for (int i = 0; i < count; ++i) {
+        ClipVertex curr = polygon[i];
+        ClipVertex next = polygon[(i + 1) % count];
+        float dCurr = dot(plane, curr.clip);
+        float dNext = dot(plane, next.clip);
+        if (dCurr >= 0.0) {
+            result[outCount++] = curr;
+        }
+        if ((dCurr >= 0.0) != (dNext >= 0.0)) {
+            float t = dCurr / (dCurr - dNext);
+            ClipVertex intersect;
+            intersect.clip          = mix(curr.clip, next.clip, t);
+            intersect.worldPosition = mix(curr.worldPosition, next.worldPosition, t);
+            intersect.normal        = mix(curr.normal, next.normal, t);
+            intersect.uv            = mix(curr.uv, next.uv, t);
+            result[outCount++] = intersect;
+        }
+    }
+    for (int i = 0; i < outCount; ++i) polygon[i] = result[i];
+    return outCount;
 }
 
 void main() {
@@ -56,31 +66,56 @@ void main() {
         polygon[i].uv = vertexData[i].uv;
     }
 
-    // OpenGL's homogeneous clip volume is -w <= x, y, z <= w.
+    count = clipAgainst(polygon, count, vec4(1, 0, 0, 1));
+    count = clipAgainst(polygon, count, vec4(-1, 0, 0, 1));
+    count = clipAgainst(polygon, count, vec4(0, 1, 0, 1));
+    count = clipAgainst(polygon, count, vec4(0, -1, 0, 1));
+    count = clipAgainst(polygon, count, vec4(0, 0, 1, 1));
+    count = clipAgainst(polygon, count, vec4(0, 0, -1, 1));
 
-    // Clip the source triangle against all six homogeneous clip planes.
-    count = clipAgainst(polygon, count, vec4(1, 0, 0, 1));  // left: x + w >= 0
-    count = clipAgainst(polygon, count, vec4(-1, 0, 0, 1)); // right: w - x >= 0
-    count = clipAgainst(polygon, count, vec4(0, 1, 0, 1));  // bottom: y + w >= 0
-    count = clipAgainst(polygon, count, vec4(0, -1, 0, 1)); // top: w - y >= 0
-    count = clipAgainst(polygon, count, vec4(0, 0, 1, 1));  // near: z + w >= 0
-    count = clipAgainst(polygon, count, vec4(0, 0, -1, 1)); // far: w - z >= 0
-
-    // A convex clipped polygon becomes (0, 1, 2), (0, 2, 3), ... .
     for (int fan = 1; fan + 1 < count; ++fan) {
         ClipVertex triangle[3] = ClipVertex[3](polygon[0], polygon[fan], polygon[fan + 1]);
         ScreenVertex screenTriangle[3];
-        // TODO: Convert each clip-space vertex to a ScreenVertex.
-        // Hint: divide xyz by clip.w, map NDC xy to pixels and z to [0, 1],
-        // and retain 1 / clip.w for perspective-correct interpolation.
-        /*************************************** TODO BEGIN ******************************************/
-        /**************************************** TODO END *******************************************/
 
-        // TODO: Bound the candidate pixels and emit a primitive covering them.
-        // Hint: Convert the screen-space bounds back to NDC; the fragment shader
-        //       will perform the exact per-pixel triangle coverage test.
-        // Hint: Use EmitVertex/EmitPrimitive
-        /*************************************** TODO BEGIN ******************************************/
-        /**************************************** TODO END *******************************************/
+        for (int i = 0; i < 3; ++i) {
+            float invW = 1.0 / triangle[i].clip.w;
+            vec3 ndc   = triangle[i].clip.xyz * invW;
+            screenTriangle[i].screenAndInvW = vec4(
+                (ndc.x * 0.5 + 0.5) * uExtent.x,
+                (ndc.y * 0.5 + 0.5) * uExtent.y,
+                ndc.z * 0.5 + 0.5,
+                invW
+            );
+            screenTriangle[i].worldPosition = triangle[i].worldPosition;
+            screenTriangle[i].normal        = triangle[i].normal;
+            screenTriangle[i].uv            = triangle[i].uv;
+        }
+
+        vec2 bmin = min(screenTriangle[0].screenAndInvW.xy,
+                    min(screenTriangle[1].screenAndInvW.xy,
+                        screenTriangle[2].screenAndInvW.xy));
+        vec2 bmax = max(screenTriangle[0].screenAndInvW.xy,
+                    max(screenTriangle[1].screenAndInvW.xy,
+                        screenTriangle[2].screenAndInvW.xy));
+
+        for (int i = 0; i < 3; ++i) {
+            gScreenAndInvW[i] = screenTriangle[i].screenAndInvW;
+            gWorld[i]         = screenTriangle[i].worldPosition;
+            gNormal[i]        = screenTriangle[i].normal;
+            gUv[i]            = screenTriangle[i].uv;
+        }
+
+        vec2 invExtent = 1.0 / uExtent;
+        vec2 corners[4];
+        corners[0] = vec2(bmin.x, bmin.y);
+        corners[1] = vec2(bmax.x, bmin.y);
+        corners[2] = vec2(bmin.x, bmax.y);
+        corners[3] = vec2(bmax.x, bmax.y);
+
+        for (int i = 0; i < 4; ++i) {
+            gl_Position = vec4(corners[i] * invExtent * 2.0 - 1.0, 0.0, 1.0);
+            EmitVertex();
+        }
+        EndPrimitive();
     }
 }

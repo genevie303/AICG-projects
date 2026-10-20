@@ -60,11 +60,34 @@ static std::vector<ClipVertex> transformVertices(Mesh const& mesh, FrameState co
 // polygon and count are updated in place; scratch storage keeps input edges intact.
 static void
 clipAgainst(std::array<ClipVertex, kMaxClippedPolygonVertices>& polygon, size_t& count, glm::vec4 const& plane) {
-    // TODO: Perform Sutherland-Hodgeman algorithm to clip the triangle with a single plane
-    // Hint: Use an additional array clipped to storge the clipped results
-    // Hint: Copy the clipped results to polygon as the output
-
     /**************************************** Todo Begin *****************************************/
+    std::array<ClipVertex, kMaxClippedPolygonVertices> clipped;
+    size_t outCount = 0;
+
+    for (size_t i = 0; i < count; ++i) {
+        ClipVertex const& curr = polygon[i];
+        ClipVertex const& next = polygon[(i + 1) % count];
+
+        float dCurr = glm::dot(plane, curr.clip);
+        float dNext = glm::dot(plane, next.clip);
+
+        if (dCurr >= 0.0f) {
+            clipped[outCount++] = curr;
+        }
+
+        if ((dCurr >= 0.0f) != (dNext >= 0.0f)) {
+            float t = dCurr / (dCurr - dNext);
+            ClipVertex intersect;
+            intersect.clip          = glm::mix(curr.clip, next.clip, t);
+            intersect.worldPosition = glm::mix(curr.worldPosition, next.worldPosition, t);
+            intersect.normal        = glm::mix(curr.normal, next.normal, t);
+            intersect.uv            = glm::mix(curr.uv, next.uv, t);
+            clipped[outCount++] = intersect;
+        }
+    }
+
+    for (size_t i = 0; i < outCount; ++i) polygon[i] = clipped[i];
+    count = outCount;
     /***************************************** Todo End ******************************************/
 }
 
@@ -97,8 +120,6 @@ buildScreenTriangles(std::vector<ClipVertex> const& vertices, std::vector<uint32
         clipAgainst(polygon, count, {0.0f, 0.0f, 1.0f, 1.0f});  // near: z + w >= 0
         clipAgainst(polygon, count, {0.0f, 0.0f, -1.0f, 1.0f}); // far: w - z >= 0
 
-        // TODO: For each clipped triangle, calculate the following attribute for its screen triangle
-
         // The clipped polygon is convex. Fan it out as (0, 1, 2), (0, 2, 3), ...;
         // fewer than three surviving vertices naturally produce no triangles.
         for (size_t triangle = 1; triangle + 1 < count; ++triangle) {
@@ -106,6 +127,41 @@ buildScreenTriangles(std::vector<ClipVertex> const& vertices, std::vector<uint32
             ScreenTriangle output{};
 
             /************************************ Todo Begin *************************************/
+            // Convert each clip-space vertex to a ScreenVertex
+            for (int i = 0; i < 3; ++i) {
+                float invW = 1.0f / clipped[i].clip.w;
+                glm::vec3 ndc = glm::vec3(clipped[i].clip) * invW;
+
+                output.vertices[i].screenAndInvW = glm::vec4(
+                    (ndc.x * 0.5f + 0.5f) * float(extent.x),
+                    (ndc.y * 0.5f + 0.5f) * float(extent.y),
+                    ndc.z * 0.5f + 0.5f,
+                    invW
+                );
+                output.vertices[i].worldPosition = clipped[i].worldPosition;
+                output.vertices[i].normal        = clipped[i].normal;
+                output.vertices[i].uv            = clipped[i].uv;
+            }
+
+            // Compute tangent and bitangent from position + UV edge vectors
+            glm::vec3 const dp1 = output.vertices[1].worldPosition - output.vertices[0].worldPosition;
+            glm::vec3 const dp2 = output.vertices[2].worldPosition - output.vertices[0].worldPosition;
+            glm::vec2 const duv1 = output.vertices[1].uv - output.vertices[0].uv;
+            glm::vec2 const duv2 = output.vertices[2].uv - output.vertices[0].uv;
+            float det = duv1.x * duv2.y - duv1.y * duv2.x;
+            if (std::abs(det) > 1e-6f) {
+                float invDet = 1.0f / det;
+                output.tangent   = glm::normalize((dp1 * duv2.y - dp2 * duv1.y) * invDet);
+                output.bitangent = glm::normalize((dp2 * duv1.x - dp1 * duv2.x) * invDet);
+            } else {
+                // Degenerate UVs: build orthonormal basis from normal
+                glm::vec3 n = glm::normalize(output.vertices[0].normal);
+                glm::vec3 up = (std::abs(n.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+                output.tangent   = glm::normalize(glm::cross(up, n));
+                output.bitangent = glm::cross(n, output.tangent);
+            }
+
+            result.push_back(output);
             /************************************* Todo End **************************************/
         }
     }
@@ -140,24 +196,72 @@ static void rasterizeTriangles(std::vector<ScreenTriangle> const& triangles,
                 size_t const pixelIndex = static_cast<size_t>(y) * extent.x + x;
 
                 glm::vec2 const p(float(x) + 0.5f, float(y) + 0.5f);
+
+                /************************************ Todo Begin *************************************/
                 // TODO: Calculate barycentric coordinates of the pixel
-                // Hint: use the screen triangle vertices a, b, c
-                /************************************ Todo Begin *************************************/
+                float w0 = glm::cross(b - a, p - a);
+                float w1 = glm::cross(c - b, p - b);
+                float w2 = glm::cross(a - c, p - c);
+
+                // Discard if outside triangle
+                if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+                    continue;
+                }
+
+                // Normalize barycentric coordinates
+                float invArea = 1.0f / area;
+                float b0 = w0 * invArea;
+                float b1 = w1 * invArea;
+                float b2 = w2 * invArea;
                 /************************************* Todo End **************************************/
 
+                /************************************ Todo Begin *************************************/
                 // TODO: Perform depth test
-                // Hint: Compare the calculated pixel depth with depthBuffer[pixelIndex]
-                // Hint: depthBuffer[pixelIndex] = ...
-                /************************************ Todo Begin *************************************/
+                float depth = b0 * triangle.vertices[0].screenAndInvW.z
+                            + b1 * triangle.vertices[1].screenAndInvW.z
+                            + b2 * triangle.vertices[2].screenAndInvW.z;
+
+                if (depth >= depthBuffer[pixelIndex]) {
+                    continue;
+                }
+                depthBuffer[pixelIndex] = depth;
                 /************************************* Todo End **************************************/
 
-                // TODO: Shade the pixel with pbrShade
-                // Hint: Calculate the following attributes of the pixel with perspective correction
-                //       + position
-                //       + normal
-                //       + uv
-                // Hint: colorBuffer[pixel] = ...;
                 /************************************ Todo Begin *************************************/
+                // TODO: Shade the pixel with pbrShade (perspective-correct interpolation)
+                float invW0 = triangle.vertices[0].screenAndInvW.w;
+                float invW1 = triangle.vertices[1].screenAndInvW.w;
+                float invW2 = triangle.vertices[2].screenAndInvW.w;
+
+                float pw0 = b0 * invW0;
+                float pw1 = b1 * invW1;
+                float pw2 = b2 * invW2;
+                float pwSum = pw0 + pw1 + pw2;
+                float invPwSum = 1.0f / pwSum;
+
+                float c0 = pw0 * invPwSum;
+                float c1 = pw1 * invPwSum;
+                float c2 = pw2 * invPwSum;
+
+                glm::vec3 worldPosition =
+                    c0 * triangle.vertices[0].worldPosition +
+                    c1 * triangle.vertices[1].worldPosition +
+                    c2 * triangle.vertices[2].worldPosition;
+
+                glm::vec3 normal = glm::normalize(
+                    c0 * triangle.vertices[0].normal +
+                    c1 * triangle.vertices[1].normal +
+                    c2 * triangle.vertices[2].normal
+                );
+
+                glm::vec2 uv =
+                    c0 * triangle.vertices[0].uv +
+                    c1 * triangle.vertices[1].uv +
+                    c2 * triangle.vertices[2].uv;
+
+                                colorBuffer[pixelIndex] = glm::vec4(pbrShade(
+                    material, frame, worldPosition, normal, triangle.tangent, triangle.bitangent, uv
+                ), 1.0f);
                 /************************************* Todo End **************************************/
             }
         }
