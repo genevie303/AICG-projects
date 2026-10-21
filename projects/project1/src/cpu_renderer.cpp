@@ -210,9 +210,9 @@ static void rasterizeTriangles(std::vector<ScreenTriangle> const& triangles,
 
                 // Normalize barycentric coordinates
                 float invArea = 1.0f / area;
-                float b0 = w0 * invArea;
-                float b1 = w1 * invArea;
-                float b2 = w2 * invArea;
+                float b0 = w1 * invArea;
+                float b1 = w2 * invArea;
+                float b2 = w0 * invArea;
                 /************************************* Todo End **************************************/
 
                 /************************************ Todo Begin *************************************/

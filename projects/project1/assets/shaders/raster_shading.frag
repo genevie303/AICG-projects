@@ -102,9 +102,9 @@ void main() {
     /**************************************** TODO END *******************************************/
 
     /*************************************** TODO BEGIN ******************************************/
-    float b0 = w0 / area;
-    float b1 = w1 / area;
-    float b2 = w2 / area;
+    float b0 = w1 / area;
+    float b1 = w2 / area;
+    float b2 = w0 / area;
     gl_FragDepth = b0 * gScreenAndInvW[0].z
                  + b1 * gScreenAndInvW[1].z
                  + b2 * gScreenAndInvW[2].z;
