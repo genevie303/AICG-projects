@@ -65,7 +65,34 @@ static float fresnelSchlick(float cosTheta, float ior) {
 static bool intersectAABB(Ray const& ray, AABB const& box) {
     // TODO: Perform ray-AABB intersection.
     /**************************************** Todo Begin *****************************************/
-    return false;
+    float tNear = 0.0f;
+    float tFar = ray.tMax;
+
+    for (int axis = 0; axis < 3; ++axis) {
+        // A direction component of zero means the ray is parallel to this slab.
+        // Dividing would produce inf or NaN, so test containment instead.
+        if (std::abs(ray.direction[axis]) < 1e-8f) {
+            if (ray.origin[axis] < box.min[axis] || ray.origin[axis] > box.max[axis]) {
+                return false;
+            }
+            continue;
+        }
+
+        auto const invDirection = 1.0f / ray.direction[axis];
+        auto tEnter = (box.min[axis] - ray.origin[axis]) * invDirection;
+        auto tExit = (box.max[axis] - ray.origin[axis]) * invDirection;
+        if (tEnter > tExit) {
+            std::swap(tEnter, tExit);
+        }
+
+        tNear = std::max(tNear, tEnter);
+        tFar = std::min(tFar, tExit);
+        if (tNear > tFar) {
+            return false;
+        }
+    }
+
+    return true;
     /***************************************** Todo End ******************************************/
 }
 
@@ -73,7 +100,30 @@ static bool intersectSphere(Ray& ray, Sphere const& sphere, glm::vec3& hitPositi
     // TODO: Find the nearest valid intersection between the ray and the sphere.
     // Hint: Update `ray.tMax` when a closer hit is found.
     /**************************************** Todo Begin *****************************************/
-    return false;
+    auto const offset = ray.origin - sphere.position;
+    auto const halfB = glm::dot(offset, ray.direction);
+    auto const c = glm::dot(offset, offset) - sphere.radius * sphere.radius;
+    auto const discriminant = halfB * halfB - c;
+
+    if (discriminant < 0.0f) {
+        return false;
+    }
+
+    auto const sqrtDiscriminant = std::sqrt(discriminant);
+
+    // Near root first; fall back to the far root for rays starting inside the sphere.
+    auto t = -halfB - sqrtDiscriminant;
+    if (t <= kEpsilon || t >= ray.tMax) {
+        t = -halfB + sqrtDiscriminant;
+        if (t <= kEpsilon || t >= ray.tMax) {
+            return false;
+        }
+    }
+
+    ray.tMax = t;
+    hitPosition = ray.at(t);
+    hitNormal = glm::normalize(hitPosition - sphere.position);
+    return true;
     /***************************************** Todo End ******************************************/
 }
 
@@ -82,7 +132,51 @@ static bool intersectTriangle(
     // TODO: Find the nearest valid intersection between the ray and the triangle.
     // Hint: Update `ray.tMax` when a closer hit is found.
     /**************************************** Todo Begin *****************************************/
-    return false;
+    auto const edge1 = b.position - a.position;
+    auto const edge2 = c.position - a.position;
+
+    auto const pVector = glm::cross(ray.direction, edge2);
+    auto const determinant = glm::dot(edge1, pVector);
+
+    // Both faces are tested, so only a near-zero determinant rejects the triangle.
+    if (std::abs(determinant) < 1e-8f) {
+        return false;
+    }
+
+    auto const invDeterminant = 1.0f / determinant;
+    auto const tVector = ray.origin - a.position;
+
+    auto const beta = glm::dot(tVector, pVector) * invDeterminant;
+    if (beta < 0.0f || beta > 1.0f) {
+        return false;
+    }
+
+    auto const qVector = glm::cross(tVector, edge1);
+    auto const gamma = glm::dot(ray.direction, qVector) * invDeterminant;
+    if (gamma < 0.0f || beta + gamma > 1.0f) {
+        return false;
+    }
+
+    auto const t = glm::dot(edge2, qVector) * invDeterminant;
+    if (t <= kEpsilon || t >= ray.tMax) {
+        return false;
+    }
+
+    auto const alpha = 1.0f - beta - gamma;
+    auto interpolatedNormal = alpha * a.normal + beta * b.normal + gamma * c.normal;
+
+    // Fall back to the geometric normal when the interpolated vector degenerates.
+    if (glm::dot(interpolatedNormal, interpolatedNormal) < 1e-12f) {
+        interpolatedNormal = glm::cross(edge1, edge2);
+        if (glm::dot(interpolatedNormal, interpolatedNormal) < 1e-12f) {
+            return false;
+        }
+    }
+
+    ray.tMax = t;
+    hitPosition = ray.at(t);
+    hitNormal = glm::normalize(interpolatedNormal);
+    return true;
     /***************************************** Todo End ******************************************/
 }
 
@@ -209,7 +303,19 @@ bool CpuRayTracer::lambertianScatterFunction(Ray& ray,
     // TODO: Generate the next ray for a Lambertian material.
     // Hint: Update `ray.origin` and `ray.direction` using a cosine-weighted sample.
     /**************************************** Todo Begin *****************************************/
-    return false;
+    auto const coord = createLocalCoord(hit.normal);
+    auto const localDirection = cosineWeightedSampleHemisphere(randomVec2(rngState));
+    auto const worldDirection = toWorld(coord, localDirection);
+
+    if (glm::dot(worldDirection, worldDirection) < 1e-12f) {
+        return false;
+    }
+
+    // The albedo weight is applied by the tracing loop, so it is not applied here.
+    ray.origin = hit.position + hit.normal * kEpsilon;
+    ray.direction = glm::normalize(worldDirection);
+    ray.tMax = std::numeric_limits<float>::max();
+    return true;
     /***************************************** Todo End ******************************************/
 }
 
@@ -217,7 +323,26 @@ bool CpuRayTracer::metalScatterFunction(Ray& ray, Hit const& hit, Material const
     // TODO: Generate the next ray for a metal material.
     // Hint: Use `material.fuzz` to perturb the reflected direction and update the ray.
     /**************************************** Todo Begin *****************************************/
-    return false;
+    auto const reflected = glm::normalize(glm::reflect(ray.direction, hit.normal));
+
+    // A cosine-weighted sample around the mirror direction widens the lobe as fuzz grows.
+    auto const coord = createLocalCoord(reflected);
+    auto const perturbation = toWorld(coord, cosineWeightedSampleHemisphere(randomVec2(rngState)));
+    auto const scattered = reflected + material.fuzz * perturbation;
+
+    if (glm::dot(scattered, scattered) < 1e-12f) {
+        return false;
+    }
+
+    auto const direction = glm::normalize(scattered);
+    if (glm::dot(direction, hit.normal) <= 0.0f) {
+        return false;
+    }
+
+    ray.origin = hit.position + hit.normal * kEpsilon;
+    ray.direction = direction;
+    ray.tMax = std::numeric_limits<float>::max();
+    return true;
     /***************************************** Todo End ******************************************/
 }
 
@@ -228,6 +353,33 @@ void CpuRayTracer::dielectricScatterFunction(Ray& ray,
     // TODO: Generate the next ray for a dielectric material.
     // Hint: Choose reflection or refraction using Fresnel reflectance and total internal reflection.
     /**************************************** Todo Begin *****************************************/
+    auto const cosIncident = glm::dot(ray.direction, hit.normal);
+    auto const entering = cosIncident < 0.0f;
+
+    // Face the normal against the incident direction and pick the matching index ratio.
+    auto const facingNormal = entering ? hit.normal : -hit.normal;
+    auto const refractionRatio = entering ? 1.0f / material.ior : material.ior;
+    auto const fresnelCosine = entering ? -cosIncident : material.ior * cosIncident;
+
+    auto const refracted = glm::refract(ray.direction, facingNormal, refractionRatio);
+    auto const totalInternalReflection = glm::dot(refracted, refracted) < 1e-12f;
+
+    glm::vec3 direction;
+    glm::vec3 origin;
+    if (totalInternalReflection || randomFloat(rngState) < fresnelSchlick(fresnelCosine, material.ior)) {
+        // Reflection stays in the incident medium.
+        direction = glm::reflect(ray.direction, facingNormal);
+        origin = hit.position + facingNormal * kEpsilon;
+    }
+    else {
+        // Refraction crosses the surface, so the offset points the other way.
+        direction = refracted;
+        origin = hit.position - facingNormal * kEpsilon;
+    }
+
+    ray.origin = origin;
+    ray.direction = glm::normalize(direction);
+    ray.tMax = std::numeric_limits<float>::max();
     /***************************************** Todo End ******************************************/
 }
 
@@ -239,7 +391,7 @@ glm::vec3 CpuRayTracer::trace(Ray ray, uint32_t& rngState) const {
             // TODO: Sample the skybox when the ray escapes the scene.
             // Hint: Sample the skybox in the ray direction.
             /**************************************** Todo Begin *****************************************/
-            return glm::vec3{0.0f};
+            return color * m_skybox->sample(ray.direction);
             /***************************************** Todo End ******************************************/
         }
         auto const& material = m_scene->materials()[hit.materialIndex];

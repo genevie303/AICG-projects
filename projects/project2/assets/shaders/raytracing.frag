@@ -383,7 +383,7 @@ vec3 trace(Ray ray, inout uint rngState) {
             // TODO: Sample the skybox when the ray escapes the scene.
             // Hint: Sample the skybox in the ray direction.
             /*************************************** TODO BEGIN ******************************************/
-            return vec3(0.0);
+            return color * texture(sky, ray.direction).rgb;
             /**************************************** TODO END *******************************************/
         }
         Material material;
@@ -410,13 +410,55 @@ bool intersect(inout Ray ray, inout Hit hit) {
     // TODO: Traverse the BVH to find the closest primitive hit.
     // Hint: Test node bounds with `intersectAABB` and leaf primitives with `intersectPrimitive`.
     /*************************************** TODO BEGIN ******************************************/
-    // return false;
+    if (nBVHNodes <= 0) {
+        return false;
+    }
+
+    int stack[64];
+    int stackSize = 0;
+    int nodeIndex = 0;
+    bool found = false;
 
     // A valid tree visits each node at most once. Bound traversal so invalid
     // resource state cannot turn into an infinite GPU loop or driver timeout.
+    for (int visited = 0; visited < nBVHNodes; ++visited) {
+        if (nodeIndex < 0 || nodeIndex >= nBVHNodes) {
+            break;
+        }
 
+        BVHNode node;
+        getBVHNodeData(bvh, nodeIndex, node);
 
-    return false;
+        if (intersectAABB(ray, node.bounds)) {
+            if (node.second < 0) {
+                int count = -node.second;
+                for (int i = 0; i < count; ++i) {
+                    int primitiveIndex = node.first + i;
+                    if (primitiveIndex < 0 || primitiveIndex >= nPrimitives) {
+                        break;
+                    }
+                    Primitive primitive;
+                    getPrimitiveData(primitiveBuffer, primitiveIndex, primitive);
+                    if (intersectPrimitive(ray, primitive, hit)) {
+                        found = true;
+                    }
+                }
+            } else if (stackSize < 64) {
+                stack[stackSize] = node.second;
+                stackSize = stackSize + 1;
+                nodeIndex = node.first;
+                continue;
+            }
+        }
+
+        if (stackSize == 0) {
+            break;
+        }
+        stackSize = stackSize - 1;
+        nodeIndex = stack[stackSize];
+    }
+
+    return found;
     /**************************************** TODO END *******************************************/
 }
 
@@ -424,9 +466,34 @@ bool intersectAABB(in Ray ray, in AABB box) {
     // TODO: Test whether the ray intersects the axis-aligned bounding box.
     // Hint: Intersect the ray interval with the box slabs along all three axes.
     /*************************************** TODO BEGIN ******************************************/
-    // return false;
+    float tNear = 0.0;
+    float tFar = ray.tMax;
 
-    return false;
+    for (int axis = 0; axis < 3; ++axis) {
+        // A direction component of zero means the ray is parallel to this slab,
+        // so test containment instead of dividing.
+        if (abs(ray.direction[axis]) < 1e-8) {
+            if (ray.origin[axis] < box.min[axis] || ray.origin[axis] > box.max[axis]) {
+                return false;
+            }
+            continue;
+        }
+
+        float invDirection = 1.0 / ray.direction[axis];
+        float tEnter = (box.min[axis] - ray.origin[axis]) * invDirection;
+        float tExit = (box.max[axis] - ray.origin[axis]) * invDirection;
+        if (tEnter > tExit) {
+            swap(tEnter, tExit);
+        }
+
+        tNear = max(tNear, tEnter);
+        tFar = min(tFar, tExit);
+        if (tNear > tFar) {
+            return false;
+        }
+    }
+
+    return true;
     /**************************************** TODO END *******************************************/
 }
 
@@ -434,8 +501,34 @@ bool intersectPrimitive(inout Ray ray, in Primitive primitive, inout Hit hit) {
     // TODO: Intersect the ray with the selected primitive.
     // Hint: Call `intersectSphere` for spheres and `intersectTriangle` for triangles.
     /*************************************** TODO BEGIN ******************************************/
-    // return false;
+    vec3 hitPosition = vec3(0.0);
+    vec3 hitNormal = vec3(0.0);
+    bool foundHit = false;
 
+    if (primitive.type == SPHERE_SHAPE) {
+        Sphere sphere;
+        getSphereData(sphereBuffer, primitive.shapeIndex, sphere);
+        foundHit = intersectSphere(ray, sphere, hitPosition, hitNormal);
+    } else if (primitive.type == TRIANGLE_SHAPE) {
+        Triangle triangle;
+        getTriangleIndexData(triangleIndexBuffer, primitive.shapeIndex, triangle);
+        TriangleData triangleData;
+        getTriangleData(vertexBuffer, triangle, triangleData);
+        foundHit = intersectTriangle(ray,
+                                     triangleData.vertices[0],
+                                     triangleData.vertices[1],
+                                     triangleData.vertices[2],
+                                     hitPosition,
+                                     hitNormal);
+    }
+
+    if (foundHit) {
+        hit.primitive = primitive;
+        hit.position = hitPosition;
+        hit.normal = hitNormal;
+        hit.materialIndex = primitive.materialIndex;
+        return true;
+    }
 
     return false;
     /**************************************** TODO END *******************************************/
@@ -445,9 +538,33 @@ bool intersectSphere(inout Ray ray, in Sphere sphere, out vec3 hitPosition, out 
     // TODO: Find the nearest valid intersection between the ray and the sphere.
     // Hint: Update `ray.tMax` and the hit point only when a closer hit is found.
     /*************************************** TODO BEGIN ******************************************/
-    // return false;
+    hitPosition = vec3(0.0);
+    hitNormal = vec3(0.0);
 
-    return false;
+    vec3 offset = ray.origin - sphere.position;
+    float halfB = dot(offset, ray.direction);
+    float c = dot(offset, offset) - sphere.radius * sphere.radius;
+    float discriminant = halfB * halfB - c;
+
+    if (discriminant < 0.0) {
+        return false;
+    }
+
+    float sqrtDiscriminant = sqrt(discriminant);
+
+    // Near root first; fall back to the far root for rays starting inside the sphere.
+    float t = -halfB - sqrtDiscriminant;
+    if (t <= Epsilon || t >= ray.tMax) {
+        t = -halfB + sqrtDiscriminant;
+        if (t <= Epsilon || t >= ray.tMax) {
+            return false;
+        }
+    }
+
+    ray.tMax = t;
+    hitPosition = getHitPoint(ray, t);
+    hitNormal = normalize(hitPosition - sphere.position);
+    return true;
     /**************************************** TODO END *******************************************/
 }
 
@@ -460,9 +577,54 @@ bool intersectTriangle(inout Ray ray,
     // TODO: Find the nearest valid intersection between the ray and the triangle.
     // Hint: Use barycentric coordinates to reject hits outside the triangle.
     /*************************************** TODO BEGIN ******************************************/
-    // return false;
+    hitPosition = vec3(0.0);
+    hitNormal = vec3(0.0);
 
-    return false;
+    vec3 edge1 = b.position - a.position;
+    vec3 edge2 = c.position - a.position;
+
+    vec3 pVector = cross(ray.direction, edge2);
+    float determinant = dot(edge1, pVector);
+
+    // Both faces are tested, so only a near-zero determinant rejects the triangle.
+    if (abs(determinant) < 1e-8) {
+        return false;
+    }
+
+    float invDeterminant = 1.0 / determinant;
+    vec3 tVector = ray.origin - a.position;
+
+    float beta = dot(tVector, pVector) * invDeterminant;
+    if (beta < 0.0 || beta > 1.0) {
+        return false;
+    }
+
+    vec3 qVector = cross(tVector, edge1);
+    float gamma = dot(ray.direction, qVector) * invDeterminant;
+    if (gamma < 0.0 || beta + gamma > 1.0) {
+        return false;
+    }
+
+    float t = dot(edge2, qVector) * invDeterminant;
+    if (t <= Epsilon || t >= ray.tMax) {
+        return false;
+    }
+
+    float alpha = 1.0 - beta - gamma;
+    vec3 interpolatedNormal = alpha * a.normal + beta * b.normal + gamma * c.normal;
+
+    // Fall back to the geometric normal when the interpolated vector degenerates.
+    if (dot(interpolatedNormal, interpolatedNormal) < 1e-12) {
+        interpolatedNormal = cross(edge1, edge2);
+        if (dot(interpolatedNormal, interpolatedNormal) < 1e-12) {
+            return false;
+        }
+    }
+
+    ray.tMax = t;
+    hitPosition = getHitPoint(ray, t);
+    hitNormal = normalize(interpolatedNormal);
+    return true;
     /**************************************** TODO END *******************************************/
 }
 
@@ -504,10 +666,19 @@ bool lambertianScatterFunction(inout Ray ray, in Hit hit, in Material material, 
     // TODO: Generate the next ray for a Lambertian material.
     // Hint: Update `ray.origin` and `ray.direction` using a cosine-weighted sample.
     /*************************************** TODO BEGIN ******************************************/
-    // return false;
+    LocalCoord coord = createLocalCoord(hit.normal);
+    vec3 localDirection = cosineWeightedSampleHemisphere(randomVec2(rngState));
+    vec3 worldDirection = toWorld(coord, localDirection);
 
+    if (dot(worldDirection, worldDirection) < 1e-12) {
+        return false;
+    }
 
-    return false;
+    // The albedo weight is applied by the tracing loop, so it is not applied here.
+    ray.origin = hit.position + hit.normal * Epsilon;
+    ray.direction = normalize(worldDirection);
+    ray.tMax = INFINITY;
+    return true;
     /**************************************** TODO END *******************************************/
 }
 
@@ -515,10 +686,26 @@ bool metalScatterFunction(inout Ray ray, in Hit hit, in Material material, inout
     // TODO: Generate the next ray for a metal material.
     // Hint: Use `material.fuzz` to perturb the reflected direction and update the ray.
     /*************************************** TODO BEGIN ******************************************/
-    // return false;
+    vec3 reflected = normalize(reflect(ray.direction, hit.normal));
 
+    // A cosine-weighted sample around the mirror direction widens the lobe as fuzz grows.
+    LocalCoord coord = createLocalCoord(reflected);
+    vec3 perturbation = toWorld(coord, cosineWeightedSampleHemisphere(randomVec2(rngState)));
+    vec3 scattered = reflected + material.fuzz * perturbation;
 
-    return false;
+    if (dot(scattered, scattered) < 1e-12) {
+        return false;
+    }
+
+    vec3 direction = normalize(scattered);
+    if (dot(direction, hit.normal) <= 0.0) {
+        return false;
+    }
+
+    ray.origin = hit.position + hit.normal * Epsilon;
+    ray.direction = direction;
+    ray.tMax = INFINITY;
+    return true;
     /**************************************** TODO END *******************************************/
 }
 
@@ -526,9 +713,32 @@ void dielectricScatterFunction(inout Ray ray, in Hit hit, in Material material, 
     // TODO: Generate the next ray for a dielectric material.
     // Hint: Choose reflection or refraction using Fresnel reflectance and total internal reflection.
     /*************************************** TODO BEGIN ******************************************/
-    // return;
+    float cosIncident = dot(ray.direction, hit.normal);
+    bool entering = cosIncident < 0.0;
 
+    // Face the normal against the incident direction and pick the matching index ratio.
+    vec3 facingNormal = entering ? hit.normal : -hit.normal;
+    float refractionRatio = entering ? 1.0 / material.ior : material.ior;
+    float fresnelCosine = entering ? -cosIncident : material.ior * cosIncident;
 
+    vec3 refracted = refract(ray.direction, facingNormal, refractionRatio);
+    bool totalInternalReflection = dot(refracted, refracted) < 1e-12;
+
+    vec3 direction;
+    vec3 origin;
+    if (totalInternalReflection || randomFloat(rngState) < fresnelSchlick(fresnelCosine, material.ior)) {
+        // Reflection stays on the incident side of the surface.
+        direction = reflect(ray.direction, facingNormal);
+        origin = hit.position + facingNormal * Epsilon;
+    } else {
+        // Refraction crosses the surface, so the offset points the other way.
+        direction = refracted;
+        origin = hit.position - facingNormal * Epsilon;
+    }
+
+    ray.origin = origin;
+    ray.direction = normalize(direction);
+    ray.tMax = INFINITY;
     /**************************************** TODO END *******************************************/
 }
 
