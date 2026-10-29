@@ -1,12 +1,14 @@
 #include "gpu_renderer.h"
-#include "shader_utils.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <common/file_utils.h>
 #include <graphics/rhi.h>
+#include <graphics/shader_module.h>
 
 GpuRenderer::GpuRenderer(uint32_t width,
                          uint32_t height,
@@ -17,7 +19,7 @@ GpuRenderer::GpuRenderer(uint32_t width,
     : Renderer(width, height) {
     /* load transform feedback shaders */ {
         std::vector<gfx::ShaderModule> shaderModules;
-        shaderModules.push_back(loadShader(transformShader, gfx::ShaderModule::Stage::Vertex));
+        shaderModules.emplace_back(readTextFile(transformShader), gfx::ShaderModule::Stage::Vertex);
         m_transformProgram =
             std::make_unique<gfx::GLProgram>(shaderModules,
                                              gfx::GLProgram::TransformFeedbackBufferMode::Interleaved,
@@ -26,9 +28,9 @@ GpuRenderer::GpuRenderer(uint32_t width,
 
     /* load transform feedback shaders */ {
         std::vector<gfx::ShaderModule> modules;
-        modules.push_back(loadShader(rasterVertexShader, gfx::ShaderModule::Stage::Vertex));
-        modules.push_back(loadShader(rasterGeometryShader, gfx::ShaderModule::Stage::Geometry));
-        modules.push_back(loadShader(rasterFragmentShader, gfx::ShaderModule::Stage::Fragment));
+        modules.emplace_back(readTextFile(rasterVertexShader), gfx::ShaderModule::Stage::Vertex);
+        modules.emplace_back(readTextFile(rasterGeometryShader), gfx::ShaderModule::Stage::Geometry);
+        modules.emplace_back(readTextFile(rasterFragmentShader), gfx::ShaderModule::Stage::Fragment);
         m_rasterProgram = std::make_unique<gfx::GLProgram>(modules);
         for (int i = 0; i < 5; ++i) {
             std::string const sampler = "uTextures[" + std::to_string(i) + "]";

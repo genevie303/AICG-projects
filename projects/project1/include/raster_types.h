@@ -73,7 +73,7 @@ struct FrameState {
     // Perspective projection used to create screen-space triangles.
     glm::mat4 projection{1.0f};
     // Needed to construct the PBR view vector.
-    glm::vec3 cameraPosition{0.0f, 0.0f, 5.0f};
+    glm::vec3 cameraPosition{0.0f, 0.0f, 3.6f};
     // Keeps transform, color, and intensity as one component.
     DirectionalLight directionalLight;
     // Raster target size in physical framebuffer pixels.

@@ -2,50 +2,67 @@
 
 ## Introduction
 
-AICG Projects is an AI-era extension of [CG-projects](https://github.com/syby119/CG-projects). The repository will include two traditional computer graphics assignments and four AI for Graphics assignments. Students will build images from first principles and explore how AI can push the boundaries of computer graphics.
+AICG Projects extends [CG-projects](https://github.com/syby119/CG-projects) with assignments in computer graphics and AI for Graphics. The curriculum has two traditional rendering projects and two AI-focused projects. Students implement core graphics techniques from first principles, then explore how learned models can support modeling and scene reconstruction.
 
-The traditional graphics projects introduce:
+The traditional rendering projects cover:
 
-- The rasterization pipeline.
-- The ray tracing pipeline.
+- Rasterization on the CPU and GPU.
+- Ray tracing on the CPU and GPU.
 
-The AI for Graphics projects will introduce:
+The AI for Graphics projects cover:
 
-- Preparing image and 3D data for learning-based graphics tasks.
-- Training and using models to represent or generate visual content.
-- Combining learned methods with rendering and image processing.
-- Evaluating results visually and with quantitative measures.
+- Turning natural-language requests into editable CAD models with an agent that checks and revises its results.
+- Reconstructing a self-captured scene with 3D Gaussian Splatting (3D-GS), then planning and simulating robot navigation within it.
 
-## Get the repository
+Each project calls for visual inspection and measurable tests of its results.
+
+## Clone the repository
 
 ```sh
 git clone https://github.com/syby119/AICG-projects.git
 cd AICG-projects
 ```
 
-## How to run
-
-### Preliminaries
-
-For the existing C++ projects, you need:
-
-- Git and CMake 3.20 or newer.
-- A C++20 compiler and standard library with `std::format` support.
-- A graphics driver with OpenGL 4.1 support.
-- [vcpkg](https://github.com/microsoft/vcpkg) to install the dependencies declared by each project's `vcpkg.json`.
-
-### Build and run
-
-Project 1 has its own `CMakeLists.txt` and dependency manifest; there is no repository-wide CMake build. Follow the [Project 1 setup guide](projects/project1/README.md) for platform-specific commands and runtime asset setup. Complete the marked TODO sections to finish the renderer. Project 2 will be added later.
-
-The setup instructions for Projects 3–6 will be added with those assignments.
-
 ## Projects
 
-| [Project 1: Software rendering](projects/project1/) | Project 2: Ray tracing |
-| --- | --- |
-| <img src="screenshots/project1.png" alt="Project 1 reference screenshot" width="480"> | To be added |
-| Project 3 | Project 4 |
-| To be added | To be added |
-| Project 5 | Project 6 |
-| To be added | To be added |
+<table width="100%">
+  <thead>
+    <tr>
+      <th width="50%"><a href="projects/project1/README.md">Project 1: Software Renderer</a></th>
+      <th width="50%"><a href="projects/project2/README.md">Project 2: Ray Tracing</a></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="50%"><img src="screenshots/project1.png" alt="Project 1 runtime screenshot" width="100%"></td>
+      <td width="50%"><img src="screenshots/project2.png" alt="Project 2 runtime screenshot" width="100%"></td>
+    </tr>
+    <tr>
+      <td width="50%">Implement and compare CPU and GPU rasterizers, including clipping, triangle coverage, depth testing, and perspective-correct interpolation.</td>
+      <td width="50%">Implement CPU and GPU ray tracers that share scene data and progressively accumulate full-image samples.</td>
+    </tr>
+  </tbody>
+</table>
+
+<table width="100%">
+  <thead>
+    <tr>
+      <th width="50%"><a href="projects/project3/README.md">Project 3: CAD Agent</a></th>
+      <th width="50%"><a href="projects/project4/README.md">Project 4: 3DGS Navigation</a></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="50%"><img src="screenshots/project3.png" alt="Project 3 CAD modeling example" width="100%"></td>
+      <td width="50%"><img src="screenshots/project4.png" alt="Project 4 navigation example" width="100%"></td>
+    </tr>
+    <tr>
+      <td width="50%">Use SimpleCADAPI to turn clarified natural-language requests into verified, editable, and exportable CAD models.</td>
+      <td width="50%">Reconstruct a self-captured real scene, plan multiple collision-free routes, and simulate a robot following the selected route.</td>
+    </tr>
+  </tbody>
+</table>
+
+Projects 1 and 2 are independent CMake applications. Each requires Git, CMake 3.20 or newer, a C++20 compiler and standard library with `std::format`, an OpenGL 4.1 capable graphics environment, and [vcpkg](https://github.com/microsoft/vcpkg) for its dependencies. Configure and build them separately; there is no repository-wide build. Their linked guides provide setup commands and runtime controls.
+
+Projects 3 and 4 provide assignment specifications and example images. Their guides cover the required workflow, validation, and submissions.

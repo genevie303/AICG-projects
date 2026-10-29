@@ -22,6 +22,8 @@ jobs:
         project:
           - directory: project1
             target: software_renderer
+          - directory: project2
+            target: ray_tracer
 
     steps:
       - uses: actions/checkout@v4

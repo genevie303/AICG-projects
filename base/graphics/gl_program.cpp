@@ -554,7 +554,7 @@ int GLProgram::getTextureBinding(std::string_view name) const {
         }
     }
 
-    return 0;
+    return -1;
 }
 
 void GLProgram::setUniform(int location, bool const& value) const {

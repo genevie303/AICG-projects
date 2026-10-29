@@ -4,17 +4,18 @@
 #include <format>
 #include <limits>
 #include <stdexcept>
+
+#include <common/file_utils.h>
 #include <common/event/event_dispatcher.h>
 #include <common/event/keyboard_event.h>
 #include <common/event/window_event.h>
 #include <glm/ext.hpp>
 #include <graphics/rhi.h>
+#include <graphics/shader_module.h>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
-
-#include "shader_utils.h"
 
 constexpr char const* kModelPath = "models/DamagedHelmet.gltf";
 constexpr char const* kTransformPath = "shaders/transform.vert";
@@ -32,7 +33,7 @@ SoftwareRendererApp::SoftwareRendererApp(Config const& config)
 
     // camera
     m_camera.aspect = m_window.aspectRatio();
-    m_camera.transform.position = {0.0f, 0.0f, 5.0f};
+    m_camera.transform.position = {0.0f, 0.0f, 3.6f};
 
     // light
     m_directionalLight.transform.rotation =
@@ -52,8 +53,8 @@ SoftwareRendererApp::SoftwareRendererApp(Config const& config)
 
     // display program
     std::vector<gfx::ShaderModule> shaderModules;
-    shaderModules.push_back(loadShader(getAssetPath(kDisplayVertexPath), gfx::ShaderModule::Stage::Vertex));
-    shaderModules.push_back(loadShader(getAssetPath(kDisplayFragmentPath), gfx::ShaderModule::Stage::Fragment));
+    shaderModules.emplace_back(readTextFile(getAssetPath(kDisplayVertexPath)), gfx::ShaderModule::Stage::Vertex);
+    shaderModules.emplace_back(readTextFile(getAssetPath(kDisplayFragmentPath)), gfx::ShaderModule::Stage::Fragment);
     m_displayProgram = std::make_unique<gfx::GLProgram>(shaderModules);
 
     // ui
